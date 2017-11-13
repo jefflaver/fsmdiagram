@@ -2,7 +2,7 @@
     <head>
         <link rel="stylesheet" href="node_modules/jointjs/dist/joint.css" />
         <script src="node_modules/jquery/dist/jquery.js"></script>
-        <script src="node_modules/lodash/lodash.js"></script>
+        <script src="node_modules/lodash/index.js"></script>
         <script src="node_modules/backbone/backbone.js"></script>
         <script src="node_modules/jointjs/dist/joint.js"></script>
         <script src="node_modules/jointjs/dist/joint.shapes.fsa.js"></script>
@@ -37,35 +37,130 @@
                     return state;
                 }
 
-                var FsmDiagram = function(stateIdToNameDict) {
-                    var cells = new Map();
+                function State(id, name) {
+                    this.id = id;
+                    this.name = name;
+                    this.linkedTo = []
+                    this.superstate = undefined;
+                }
+                
+                function StateGridInfo(state, x, y) {
+                    this.state = state;
+                    this.width = 1;
+                    this.height = 1;
+                }
+
+                function FsmGridLayout() {
+                    var grid = [[]];
+                }
+
+                var FsmDescription = function(inialState, statesInfo) {
+                    var states = new Map();
+                    var stateNamesToIds = new Map();
 
                     this.addState = function(id, name) {
-                        cells.set(id, addState(name));
+                        states.set(id, new State(id, name));
+                        stateNamesToIds.set(name, id);
                     };
+
+                    function getState(idOrName) {
+                        var id = idOrName;
+                        if(typeof(idOrName) === 'string') {
+                            id = stateNamesToIds.get(idOrName);
+                        }
+
+                        if(id === undefined || !states.has(id)) {
+                            throw "Unknown state! idOrName = " + idOrName + ", id = " + id;
+                        }
+
+                        return states.get(id);
+                    }
 
                     this.getCells = function() {
-                        return Array.from(cells.values());
+                        return Array.from(states.values());
                     };
 
-                    // Constructor
-                    for(var id in stateIdToNameDict) {
-                        this.addState(id, stateIdToNameDict[id]);
+                    this.getStates = function() {
+                        return states;
                     }
+
+                    function initialize() {
+                        // First pass, add all the states
+                        statesInfo.forEach(function(stateInfo) {
+                            this.addState(stateInfo.id, stateInfo.name);
+                        }, this);
+
+                        // Second pass, process all the links and substates
+                        statesInfo.forEach(function(stateInfo) {
+                            state = states.get(stateInfo.id);
+                            if('links' in stateInfo) {
+                                stateInfo.links.forEach(function(link) {
+                                    state.linkedTo.push(getState(link));
+                                }, this);
+                            }
+                            if('substates' in stateInfo) {
+                                stateInfo.substates.forEach(function(substate) {
+                                    getState(substate).superstate = state;
+                                }, this);
+                            }
+                        }, this);
+                    }
+
+                    // Constructor
+                    initialize.apply(this);
                 }
 
                 return {
-                    FsmDiagram: FsmDiagram
+                    FsmDescription: FsmDescription
                 }
             })();
 
-            var myFsm = new quartz.FsmDiagram({
-                0: "NotSent",
-                1: "Processing",
-                2: "BuildingMessage"
-            });
+            var myFsm = new quartz.FsmDescription(
+                'NotSent',
+                [
+                    {
+                        id: 0,
+                        name: 'NotSent',
+                        links: ['Processing']
+                    },
+                    {
+                        id: 1,
+                        name: 'Processing',
+                        links: ['TradeCancelled', 'Complete'],
+                        substates: ['BuildingMessage', 'SendingMessage', 'MessageSent', 'WaitToCancel'],
+                        initialState: 'BuildingMessage'
+                    },
+                    {
+                        id: 2,
+                        name: 'BuildingMessage',
+                        links: ['SendingMessage']
+                    },
+                    {
+                        id: 3,
+                        name: 'SendingMessage',
+                        links: ['MessageSent', 'WaitToCancel']
+                    },
+                    {
+                        id: 4,
+                        name: 'MessageSent'
+                    },
+                    {
+                        id: 5,
+                        name: 'TradeCancelled'
+                    },
+                    {
+                        id: 6,
+                        name: 'Complete'
+                    },
+                    {
+                        id: 7,
+                        name: 'WaitToCancel',
+                        links: ['TradeCancelled']
+                    }
+                ]
+            );
 
-            graph.addCells(myFsm.getCells());
+            //graph.addCells(myFsm.getCells());
         </script>
     </body>
 </html>
