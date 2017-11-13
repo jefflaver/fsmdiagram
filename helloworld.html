@@ -1,0 +1,71 @@
+<html>
+    <head>
+        <link rel="stylesheet" href="node_modules/jointjs/dist/joint.css" />
+        <script src="node_modules/jquery/dist/jquery.js"></script>
+        <script src="node_modules/lodash/lodash.js"></script>
+        <script src="node_modules/backbone/backbone.js"></script>
+        <script src="node_modules/jointjs/dist/joint.js"></script>
+        <script src="node_modules/jointjs/dist/joint.shapes.fsa.js"></script>
+        <script src="joint.shapes.quartz.js"></script>
+    </head>
+    <body>
+        <div id="myholder"></div>
+        <script type="text/javascript">
+
+            var graph = new joint.dia.Graph;
+        
+            var paper = new joint.dia.Paper({
+                el: $('#myholder'),
+                width: 1000,
+                height: 1000,
+                model: graph,
+                gridSize: 1
+            });
+
+            var quartz = (function() {
+                var curX = 0;
+
+                function addState(name) {
+                    var textWidth = Math.max(name.length * 10, 100);
+                    var state = new joint.shapes.quartz.State({
+                        position: { x: curX, y: 30 },
+                        size: { width: textWidth, height: 50 },
+                        attrs: { text: { text: name } }
+                    });
+
+                    curX += textWidth + 20;
+                    return state;
+                }
+
+                var FsmDiagram = function(stateIdToNameDict) {
+                    var cells = new Map();
+
+                    this.addState = function(id, name) {
+                        cells.set(id, addState(name));
+                    };
+
+                    this.getCells = function() {
+                        return Array.from(cells.values());
+                    };
+
+                    // Constructor
+                    for(var id in stateIdToNameDict) {
+                        this.addState(id, stateIdToNameDict[id]);
+                    }
+                }
+
+                return {
+                    FsmDiagram: FsmDiagram
+                }
+            })();
+
+            var myFsm = new quartz.FsmDiagram({
+                0: "NotSent",
+                1: "Processing",
+                2: "BuildingMessage"
+            });
+
+            graph.addCells(myFsm.getCells());
+        </script>
+    </body>
+</html>
