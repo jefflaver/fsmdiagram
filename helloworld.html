@@ -9,14 +9,20 @@
         <script src="joint.shapes.quartz.js"></script>
     </head>
     <body>
-        <div id="myholder"></div>
+        <div id="myholder"></div><br/><br/>
+        <button id="prev">Previous Event</button>
+        <button id="next">Next Event</button><br/><br/>
+        <pre id="eventJson"></pre>
+
         <script type="text/javascript">
 
             function State(details) {
+                this.id = joint.util.uuid();
                 this.name = details.name;
                 this.entryActions = [];
                 this.eventActions = {};
                 this.exitActions = [];
+                this.diagram = details.diagram;
 
                 if(details.hasOwnProperty('entryActions')) {
                     this.entryActions = details.entryActions;
@@ -36,41 +42,42 @@
             }
             StateDiagram.prototype.getStateByName = function(name) {
                 for(var idx in this.states) {
-                    if(this.states[idx].name === name) {
-                        return this.states[idx];
+                    var topLevelState = name.split("::")[0];
+                    if(this.states[idx].name === topLevelState) {
+                        if(name.indexOf("::") > 0) {
+                            return this.states[idx].diagram.getStateByName(
+                                name.substr(name.indexOf("::") + 2));
+                        } else {
+                            return this.states[idx];
+                        }
                     }
                 }
                 return undefined;
             }
-            StateDiagram.prototype.getConnectedStates = function(state) {
+            StateDiagram.prototype.getConnectedTopLevelStates = function(state) {
                 var states = [];
                 this.links.forEach(function(link) {
-                    if(link.from === state.name) {
-                        states.push(this.getStateByName(link.to));
+                    var topLevelFromState = link.from.split("::")[0];
+                    if(topLevelFromState === state.name) {
+                        var topLevelToState = link.to.split("::")[0];
+                        states.push(this.getStateByName(topLevelToState));
                     }
                 }, this);
                 return states;
             }
 
-            function SuperState(details, diagram) {
-                State.call(this, details);
-                this.diagram = diagram;
-            }
-            SuperState.prototype = Object.create(State.prototype);
-            SuperState.prototype.SuperState = SuperState;
-
             function GridStateDiagram(initialState, states, links) {
                 StateDiagram.call(this, initialState, states, links);
                 
-                this.grid = [];
+                this.grid = [[]];
 
                 this.layoutStatesOntoGrid();
             }
             GridStateDiagram.prototype = Object.create(StateDiagram.prototype);
             GridStateDiagram.prototype.GridStateDiagram = GridStateDiagram;
             GridStateDiagram.prototype.findStateLocation = function(state) {
-                for(var x in this.grid) {
-                    for(var y in this.grid[x]) {
+                for(var x = 0; x < this.grid.length; x++) {
+                    for(var y = 0; y < this.grid[x].length; y++) {
                         if(state == this.grid[x][y]) {
                             return {x: x, y: y};
                         }
@@ -79,8 +86,11 @@
                 return undefined;
             };
             GridStateDiagram.prototype.layoutStatesOntoGrid = function() {
-                var states = [this.getStateByName(this.initialState)];
+                var initialState = this.getStateByName(this.initialState);
+                var states = [initialState];
                 var visited = new Set();
+                this.grid[0].push(initialState);
+
 
                 while(states.length) {
                     var state = states.shift();
@@ -90,14 +100,24 @@
                     }
                     visited.add(state);
 
-                    this.grid.push([]);
-                    var loc = this.findStateLocation(state);
-                    if(undefined !== loc) {
-                        this.grid[loc.x].splice(loc.y, 1);
-                    }
-                    this.grid[this.grid.length - 1].push(state);
+                    var stateLoc = this.findStateLocation(state);
+                    var connectedStates = this.getConnectedTopLevelStates(state)
+                        .filter(function(connected) {
+                            return !visited.has(connected);
+                        });
 
-                    states = states.concat(this.getConnectedStates(state));
+                    connectedStates.forEach(function(connectedState) {
+                        var loc = this.findStateLocation(connectedState);
+                        if(undefined !== loc) {
+                            this.grid[loc.x].splice(loc.y, 1);
+                        }
+                        if(this.grid.length === stateLoc.x + 1) {
+                            this.grid.push([]);
+                        }
+                        this.grid[stateLoc.x + 1].push(connectedState);
+                    }, this);
+
+                    states = states.concat(connectedStates);
                 }
 
                 var loneStates = this.states.filter(function(state) {
@@ -105,7 +125,7 @@
                 }, this);
 
                 loneStates.forEach(function(state) {
-                    var connectedStates = this.getConnectedStates(state);
+                    var connectedStates = this.getConnectedTopLevelStates(state);
                     var minX = this.grid.length;
                     connectedStates.forEach(function(connectedState) {
                         var loc = this.findStateLocation(connectedState);
@@ -118,42 +138,50 @@
                     }
                 }, this);
 
+                /*
                 // Adjust back a level, where necessary
                 this.states.forEach(function(state) {
-                    var connectedStates = this.getConnectedStates(state);
+                    var connectedStates = this.getConnectedTopLevelStates(state);
                     var loc = this.findStateLocation(state);
                     var newX = loc.x;
-                    connectedStates.forEach(function(connectedState) {
-                        var connectedLoc = this.findStateLocation(connectedState);
-                        newX = Math.min(connectedLoc.x, loc.x);
-                    }, this);
+                    for(var idx in connectedStates) {
+                        var connectedLoc = this.findStateLocation(connectedStates[idx]);
+                        if(connectedLoc.x < loc.x) {
+                            newX = loc.x - 1;
+                            break;
+                        }
+                    }
                     if(newX !== loc.x) {
                         this.grid[loc.x].splice(loc.y, 1);
                         this.grid[newX].push(state);
                     }
-                }, this);
 
+                    this.grid = this.grid.filter(function(yGrid) {
+                        return yGrid.length > 0;
+                    })
+                }, this);
+                */
                 this.grid = this.grid.filter(function(yGrid) {
                     return yGrid.length > 0;
-                })
+                });
             };
 
             function actionTextCreator(prefix, actions) {
-                var maxLength = 0;
-                var actionText = "";
+                var actionText = prefix + " / ";
+
+                var maxLength = actionText.length + (actions.length ? actions[0].length + 2: 0);
 
                 actions.forEach(function(action, index) {
-                    var text;
+                    var text = "";
                     if(index > 0) {
-                        text = "    ";
-                    } else {
-                        text = prefix + " / ";
+                        text = "\n    ";
                     }
-                    text += action + "()\n";
+                    text += action + "()";
                     maxLength = Math.max(maxLength, text.length);
 
                     actionText += text;
                 });
+                actionText += "\n";
 
                 return {
                     text: actionText,
@@ -161,12 +189,12 @@
                 };
             }
 
-            const DEFAULT_STATE_WIDTH = 150;
-            const DEFAULT_STATE_HEIGHT = 80;
-            const TEXT_HEIGHT = 9;
-            const TEXT_WIDTH = 7;
-
             function getRenderableStateInfo(state) {
+                const DEFAULT_STATE_WIDTH = 150;
+                const DEFAULT_STATE_HEIGHT = 60;
+                const TEXT_HEIGHT = 9;
+                const TEXT_WIDTH = 7;
+
                 var actionText = "";
                 var width = DEFAULT_STATE_WIDTH;
                 var height = DEFAULT_STATE_HEIGHT;
@@ -192,75 +220,132 @@
                 width = Math.max(width, actionTextInfo.maxLength * TEXT_WIDTH);
 
                 return {
+                    name: state.name,
                     actionText: actionText,
                     width: width, 
                     height: height
                 };
             }
 
-            function getRenderableDiagram(gridDiagram) {
-                var curX = 0;
-                var renderableGrid = [];
-                gridDiagram.grid.forEach(function(column) {
-                    var curY = 0;
-                    renderableGrid.push([]);
-                    column.forEach(function(state) {
-                        if(state instanceof SuperState) {
 
-                        } else {
-                            renderableGrid[renderableGrid.length - 1].push(
-                                getRenderableStateInfo(state));
+            function gridDiagramToRenderableDiagram(gridDiagram, x, y, z) {
+                const PADDING_BETWEEN_STATES = 70;
+                const PADDING_AROUND_DIAGRAM = 20;
+                const PADDING_BEFORE_SUBDIAGRAM = 10;
+
+                x = x || 0;
+                y = y || 0;
+                z = z || 0;
+
+                var renderableDiagramInfo = {
+                    width: 0,
+                    height: 0,
+                    elements: []
+                };
+
+                var rowHeight = [];
+                var colWidth = [];
+                for(var col = 0; col < gridDiagram.grid.length; col++) {
+                    colWidth.push(0);
+                    for(var row = 0; row < gridDiagram.grid[col].length; row++) {
+                        if(row === rowHeight.length) {
+                            rowHeight.push(0);
+                        }
+                        var state = gridDiagram.grid[col][row];
+                        var details = getRenderableStateInfo(state);
+                        if(state.diagram) {
+                            var subDiagram = gridDiagramToRenderableDiagram(state.diagram);
+                            details.width = Math.max(
+                                details.width, 
+                                subDiagram.width + PADDING_BEFORE_SUBDIAGRAM);
+                            details.height += subDiagram.height;
+                        }
+                        colWidth[col] = Math.max(colWidth[col], details.width);
+                        rowHeight[row] = Math.max(rowHeight[row], details.height);
+                    }
+                }
+
+                var curX = x;
+                for(var col = 0; col < gridDiagram.grid.length; col++) {
+                    var curY = y;
+                    for(var row = 0; row < gridDiagram.grid[col].length; row++) {
+                        var state = gridDiagram.grid[col][row];
+                        var details = getRenderableStateInfo(state);
+
+                        if(state.diagram) {
+                            var subDiagram = gridDiagramToRenderableDiagram(
+                                state.diagram,
+                                curX + PADDING_BEFORE_SUBDIAGRAM,
+                                curY + details.height,
+                                z + 1);
+                            details.width = Math.max(details.width, subDiagram.width);
+                            details.height += subDiagram.height;
+
+                            renderableDiagramInfo.elements = 
+                                renderableDiagramInfo.elements.concat(subDiagram.elements);
+                        }
+
+                        //var middleOfRow = curY + ((rowHeight[row] - details.height) / 2);
+                        //var middleOfCol = curX + ((colWidth[col] - details.width) / 2);
+                        renderableDiagramInfo.elements.push({
+                            type: "state",
+                            id: state.id,
+                            position: { x: curX, y: curY, z: z },
+                            details: details});
+
+                        curY += rowHeight[row] + PADDING_BETWEEN_STATES;
+                    }
+
+                    renderableDiagramInfo.height = Math.max(renderableDiagramInfo.height, curY - y);
+                    renderableDiagramInfo.width += colWidth[col] + PADDING_BETWEEN_STATES;
+                    curX += colWidth[col] + PADDING_BETWEEN_STATES;
+                }
+
+                renderableDiagramInfo.height -= PADDING_BETWEEN_STATES - PADDING_AROUND_DIAGRAM;
+                renderableDiagramInfo.width -= PADDING_BETWEEN_STATES - PADDING_AROUND_DIAGRAM;
+
+                // Process the links
+                gridDiagram.links.forEach(function(link) {
+                    renderableDiagramInfo.elements.push({
+                        type: "link",
+                        details: {
+                            source: gridDiagram.getStateByName(link.from).id,
+                            target: gridDiagram.getStateByName(link.to).id
                         }
                     });
                 });
 
-                return renderableGrid;
+                return renderableDiagramInfo;
             }
 
-            function createStateJointJsElement(renderableState) {
-                return new joint.shapes.quartz.State({
-                    size: {
-                        width: renderableState.width,
-                        height: renderableState.height 
-                    },
-                    attrs: {
-                        ".name": { text: renderableState.name },
-                        ".actions": { text: renderableState.actionText }
-                    }
-                });
+            function createJointJsElement(renderableState) {
+                var element;
+                if("state" === renderableState.type) {
+                    element = new joint.shapes.quartz.State({
+                        id: renderableState.id,
+                        position: renderableState.position,
+                        z: renderableState.position.z,
+                        size: {
+                            width: renderableState.details.width,
+                            height: renderableState.details.height 
+                        },
+                        attrs: {
+                            ".name": { text: renderableState.details.name },
+                            ".actions": { text: renderableState.details.actionText }
+                        }
+                    });
+                } else if("link" == renderableState.type) {
+                    element = new joint.shapes.fsa.Arrow({
+                        z: 1000,
+                        source: { id: renderableState.details.source },
+                        target: { id: renderableState.details.target }
+                    });
+                }
+
+                return element;
             }
 
             (function() {
-
-                var ProcessingSuperState = new SuperState(
-                    {
-                        name: "Processing"
-                    },
-                    new StateDiagram(
-                        "BuildingMessage",
-                        [
-                            new State({
-                                name: "BuildingMessage"
-                            }),
-                            new State({
-                                name: "SendingMessage"
-                            }),
-                            new State({
-                                name: "MessageSent"
-                            })
-                        ],
-                        [
-                            {
-                                from: "BuildingMessage",
-                                to: "SendingMessage"
-                            },
-                            {
-                                from: "SendingMessage",
-                                to: "MessageSent"
-                            }
-                        ]
-                    )
-                );
 
                 var TradeWorkflow = new GridStateDiagram(
                     "NotSent",
@@ -268,67 +353,352 @@
                         new State({
                             name: "NotSent"
                         }),
-                        ProcessingSuperState,
                         new State({
-                            name: "SetupIssue"
+                            name: "MatchingWorkflow",
+                            diagram: new GridStateDiagram(
+                                "SendTrade",
+                                [
+                                    new State({
+                                        name: "SendTrade",
+                                        entryActions: ["auditState"],
+                                        diagram: new GridStateDiagram(
+                                            "BuildMessage",
+                                            [
+                                                new State({
+                                                    name: "BuildMessage",
+                                                    entryActions: [
+                                                        "generateTradeId", 
+                                                        "buildTradeMessage"
+                                                    ]
+                                                }),
+                                                new State({
+                                                    name: "WaitToAmend"
+                                                }),
+                                                new State({
+                                                    name: "BuildAmendMessage",
+                                                    entryActions: [
+                                                        "auditState", 
+                                                        "markTradeIdInactive", 
+                                                        "generateTradeId", 
+                                                        "buildTradeAmendMessage"
+                                                    ]
+                                                }),
+                                                new State({
+                                                    name: "SendMessage",
+                                                    entryActions: [
+                                                        "auditMessage", 
+                                                        "associateTradeId", 
+                                                        "sendMessage"
+                                                    ]
+                                                }),
+                                                new State({
+                                                    name: "Sent",
+                                                    entryActions: ["auditState"]
+                                                }),
+                                                new State({
+                                                    name: "WaitToCancel"
+                                                })
+                                            ],
+                                            [
+                                                {
+                                                    from: "BuildMessage",
+                                                    to: "SendMessage",
+                                                    text: "MessageBuiltEvent"
+                                                },
+                                                {
+                                                    from: "BuildMessage",
+                                                    to: "WaitToAmend",
+                                                    text: "TradeAmendedEvent"
+                                                },
+                                                {
+                                                    from: "BuildAmendMessage",
+                                                    to: "SendMessage",
+                                                    text: "MessageBuiltEvent"
+                                                },
+                                                {
+                                                    from: "SendMessage",
+                                                    to: "Sent",
+                                                    text: "MessageSentEvent"
+                                                },
+                                                {
+                                                    from: "SendMessage",
+                                                    to: "WaitToAmend",
+                                                    text: "TradeAmendedEvent"
+                                                },
+                                                {
+                                                    from: "SendMessage",
+                                                    to: "WaitToCancel",
+                                                    text: "TradeCancelledEvent"
+                                                },
+                                                {
+                                                    from: "WaitToAmend",
+                                                    to: "BuildAmendMessage",
+                                                    text: "MessageSentEvent / auditEvent"
+                                                },
+                                                {
+                                                    from: "WaitToAmend",
+                                                    to: "BuildMessage",
+                                                    text: "MessageBuiltEvent"
+                                                }
+                                            ]
+                                        )
+                                    }),
+                                    new State({
+                                        name: "WaitForStatuses",
+                                        eventActions: {
+                                            ReceivedByCMSEngineEvent: ["updateConfirmationWorkflowDetails"]
+                                        },
+                                        diagram: new GridStateDiagram(
+                                            "WaitForResponse",
+                                            [
+                                                new State({
+                                                    name: "WaitForResponse"
+                                                }),
+                                                new State({
+                                                    name: "Received",
+                                                    entryActions: ["auditState"]
+                                                }),
+                                                new State({
+                                                    name: "Accepted",
+                                                    entryActions: ["auditState"]
+                                                }),
+                                                new State({
+                                                    name: "Rejected",
+                                                    entryActions: ["auditState"]
+                                                }),
+                                                new State({
+                                                    name: "Matched",
+                                                    eventActions: {
+                                                        ManuallyConfirmedEvent: []
+                                                    }
+                                                }),
+                                            ],
+                                            [
+                                                {
+                                                    from: "WaitForResponse",
+                                                    to: "Received",
+                                                    text: "ReceivedByBrokerEvent"
+                                                },
+                                                {
+                                                    from: "Received",
+                                                    to: "Accepted",
+                                                    text: "AcceptedByBrokerEvent"
+                                                },
+                                                {
+                                                    from: "Received",
+                                                    to: "Rejected",
+                                                    text: "RejectedByBrokerEvent"
+                                                },
+                                                {
+                                                    from: "Accepted",
+                                                    to: "Matched",
+                                                }
+                                            ]
+                                        )
+                                    }),
+                                    new State({
+                                        name: "InvalidMessage",
+                                        entryActions: ["disassociatedTradeId"]
+                                    }),
+                                    new State({
+                                        name: "SetupError",
+                                        entryActions: ["clearTradeId"]
+                                    })
+                                ],
+                                [
+                                    {
+                                        from: "SendTrade::Sent",
+                                        to: "WaitForStatuses"
+                                    },
+                                    {
+                                        from: "WaitForStatuses",
+                                        to: "SendTrade::BuildAmendMessage",
+                                        text: "TradeAmendedEvent"
+                                    },
+                                    {
+                                        from: "WaitForStatuses::WaitForResponse",
+                                        to: "InvalidMessage",
+                                        text: "ErrorMessageEvent / auditEvent"
+                                    },
+                                    {
+                                        from: "SendTrade::BuildMessage",
+                                        to: "SetupError",
+                                        text: "InvalidSetupEvent / auditEvent"
+                                    },
+                                    {
+                                        from: "SendTrade::BuildAmendMessage",
+                                        to: "SetupError",
+                                        text: "InvalidSetupEvent / auditEvent"
+                                    },
+                                    {
+                                        from: "SetupError",
+                                        to: "SendTrade",
+                                        text: "ReleasedEvent / auditEvent"
+                                    }
+                                ]
+                            )
                         }),
                         new State({
-                            name: "SomeState"
-                        }),
-                        new State({
-                            name: "SomeOtherState"
+                            name: "Final"
                         })
                     ],
                     [
                         {
                             from: "NotSent",
-                            to: "Processing"
+                            to: "MatchingWorkflow",
+                            text: "ReleasedEvent / auditEvent"
                         },
                         {
-                            from: "Processing",
-                            to: "SetupIssue"
+                            from: "NotSent",
+                            to: "Final",
+                            text: "ManuallyConfirmedEvent / auditEvent"
                         },
                         {
-                            from: "SetupIssue",
-                            to: "Processing"
+                            from: "MatchingWorkflow",
+                            to: "Final",
+                            text: "TradeCancelledEvent / auditEvent"
                         },
                         {
-                            from: "SomeState",
-                            to: "Processing"
-                        },
-                        {
-                            from: "SomeOtherState",
-                            to: "NotSent"
+                            from: "MatchingWorkflow",
+                            to: "Final",
+                            text: "ManuallyConfirmedEvent / auditEvent"
                         }
                     ]
                 );
+
+                var renderableDiagram = gridDiagramToRenderableDiagram(TradeWorkflow);
                 
                 var graph = new joint.dia.Graph;
             
                 var paper = new joint.dia.Paper({
                     el: $('#myholder'),
-                    width: 1000,
-                    height: 1000,
+                    width: renderableDiagram.width + 50,
+                    height: renderableDiagram.height + 50,
                     model: graph,
                     gridSize: 1
                 });
 
-                var myState = createStateJointJsElement(
-                    getRenderableStateInfo(new State({
-                        name: "NotSent",
-                        entryActions: ["action1", "action2"],
-                        eventActions: {
-                            MessageSent: ["action3"],
-                            MessageBuilt: ["anotherAction?"],
-                            Limit: ["pushItTo!?"],
-                            More: ["moremoremore"],
-                            Uhoh: ["noooooo"],
-                        },
-                        exitActions: ["SomeOtherLongerAction"]
-                    })));
-                graph.addCell(myState);
+                var idToJointJsElement = new Map();
+                renderableDiagram.elements.forEach(function(element) {
+                    var jointJsElement = createJointJsElement(element);
+                    idToJointJsElement.set(jointJsElement.id, jointJsElement);
+                    graph.addCell(jointJsElement);
+                });
 
-                console.log(getRenderableDiagram(TradeWorkflow));
+                (function eventDisplay() {
+                    var events = [
+                        {
+
+                        },
+                        {
+                            name: "ReleasedEvent",
+                            details: {
+                                eventCreatorUuid: 23257,
+                                ticketId: {
+                                    ticketNumber: 11111,
+                                    asOfDate: "2017-11-16Z"
+                                },
+                                notes: "Test"
+                            }
+                        },
+                        {
+                            name: "MessageBuiltEvent",
+                            details: {
+                                eventCreatorUuid: null,
+                                ticketId: {
+                                    ticketNumber: 11111,
+                                    asOfDate: "2017-11-16Z"
+                                },
+                                message: "8=FIX.4.4|8=FIX.4.4|9=0649|35=J|49=MOM_VCON_GW|56=MOM_VCONB|34=15641|50=TSAM_FIET|128=i.fixalloc|115=ASRVB.3212|52=20171115-23:14:05|60=20171115-18:14:05|423=1|64=20171117|6=107.24|159=4274.68|9009=322838|70=32121711150003228380:0|460=3|71=0|793=3739:20171115:50242:5|854=0|15=USD|75=20171115|857=0|48=124857AE3|381=417163.6|22=1|53=389000|54=1|55=CBS|626=1|9896=3212|58=Auto-released to FIET|118=421438.28|78=1|79=10|661=99|80=389000|467=322839|539=1|524=TSAM|525=D|538=24|12=0|13=3|154=421438.28|736=USD|5546=417163.6|742=4274.68|85=1|165=2|787=S|781=1|782=DTC|783=D|784=10|453=3|448=6795906|447=D|452=11|448=VCON|447=D|452=1|448=VCON|447=D|452=13|124=1|32=389000|31=107.24|10=079"
+                            }
+                        },
+                        {
+                            name: "MessageSentEvent",
+                            details: {
+                                eventCreatorUuid: null,
+                                ticketId: {
+                                    ticketNumber: 11111,
+                                    asOfDate: "2017-11-16Z"
+                                }
+                            }
+                        },
+                        {
+                            name: "ReceivedByBrokerEvent",
+                            details: {
+                                eventCreatorUuid: null,
+                                identifier: {
+                                    platformId: "0289000011111171116"
+                                }
+                            }
+                        },
+                        {
+                            name: "AcceptedByBrokerEvent",
+                            details: {
+                                eventCreatorUuid: null,
+                                identifier: {
+                                    platformId: "0289000011111171116"
+                                },
+                                notes: "Looks good"
+                            }
+                        }
+                    ];
+
+                    var states = [
+                        "NotSent",
+                        "MatchingWorkflow::SendTrade::BuildMessage",
+                        "MatchingWorkflow::SendTrade::SendMessage",
+                        "MatchingWorkflow::WaitForStatuses::WaitForResponse",
+                        "MatchingWorkflow::WaitForStatuses::Received",
+                        "MatchingWorkflow::WaitForStatuses::Accepted"
+                    ];
+
+                    var currentEventIdx = 0;
+                    $('#eventJson').text(JSON.stringify(events[currentEventIdx]));
+                    highlight(states[currentEventIdx]);
+
+                    function prevEvent() {
+                        unhighlight(states[currentEventIdx]);
+                        currentEventIdx--;
+                        $('#eventJson').text(JSON.stringify(events[currentEventIdx]));
+                        highlight(states[currentEventIdx]);
+
+                        if(0 === currentEventIdx) {
+                            $('#prev').prop('disabled', true);
+                        }
+                        if(events.length > currentEventIdx + 1) {
+                            $('#next').prop('disabled', false);
+                        }
+                    }
+
+                    function nextEvent() {
+                        unhighlight(states[currentEventIdx]);
+                        currentEventIdx++;
+                        $('#eventJson').text(JSON.stringify(events[currentEventIdx], null, 2));
+                        highlight(states[currentEventIdx]);
+                        if(0 < currentEventIdx) {
+                            $('#prev').prop('disabled', false);
+                        }
+                        if(events.length === currentEventIdx + 1) {
+                            $('#next').prop('disabled', true);
+                        }
+                    }
+
+                    function highlight(state) {
+                        var id = TradeWorkflow.getStateByName(state).id;
+                        var view = paper.findViewByModel(idToJointJsElement.get(id));
+                        view.highlight();
+                    }
+                    
+                    function unhighlight(state) {
+                        var id = TradeWorkflow.getStateByName(state).id;
+                        var view = paper.findViewByModel(idToJointJsElement.get(id));
+                        view.unhighlight();
+                    }
+
+                    $('#prev').prop('disabled', true);
+                    $('#prev').on('click', prevEvent);
+                    $('#next').on('click', nextEvent);
+                })();
             })();
 
         </script>
