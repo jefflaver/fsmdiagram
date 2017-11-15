@@ -11,21 +11,34 @@ joint.dia.Element.define('quartz.State', {
             fill: 'blue',
             stroke: '#000000',
             height: 20,
-            'ref-width': '1',
-            'ref-x': 0,
-            'ref-y': 0
+            'ref': '.state',
+            'ref-width': 1,
+            x: 0,
+            y: 0
         },
-        'text': {
+        '.name': {
             fill: 'white',
             text: '',
             'font-size': 14,
+            'ref': '.state',
             'ref-x': .5,
             'ref-y': 10,
             'text-anchor': 'middle',
             'y-alignment': 'middle',
             'font-family': 'Arial, helvetica, sans-serif'
+        },
+        '.actions': {
+            fill: 'black',
+            text: '',
+            'font-size': 14,
+            'ref': '.state',
+            'ref-x': 5,
+            'ref-y': 25,
+            'text-anchor': 'left',
+            'y-alignment': 'left',
+            'font-family': 'Arial, helvetica, sans-serif'
         }
     }
 }, {
-    markup: '<g class="rotatable"><g class="scalable"><rect class="state"/></g><rect class="header"/><text/></g>'
+    markup: '<g class="rotatable"><g class="scalable"><rect class="state"/></g><rect class="header"/><text class="name"/><text class="actions"/></g>'
 });

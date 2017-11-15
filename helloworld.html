@@ -12,155 +12,325 @@
         <div id="myholder"></div>
         <script type="text/javascript">
 
-            var graph = new joint.dia.Graph;
-        
-            var paper = new joint.dia.Paper({
-                el: $('#myholder'),
-                width: 1000,
-                height: 1000,
-                model: graph,
-                gridSize: 1
-            });
+            function State(details) {
+                this.name = details.name;
+                this.entryActions = [];
+                this.eventActions = {};
+                this.exitActions = [];
 
-            var quartz = (function() {
-                var curX = 0;
-
-                function addState(name) {
-                    var textWidth = Math.max(name.length * 10, 100);
-                    var state = new joint.shapes.quartz.State({
-                        position: { x: curX, y: 30 },
-                        size: { width: textWidth, height: 50 },
-                        attrs: { text: { text: name } }
-                    });
-
-                    curX += textWidth + 20;
-                    return state;
+                if(details.hasOwnProperty('entryActions')) {
+                    this.entryActions = details.entryActions;
                 }
-
-                function State(id, name) {
-                    this.id = id;
-                    this.name = name;
-                    this.linkedTo = []
-                    this.superstate = undefined;
+                if(details.hasOwnProperty('eventActions')) {
+                    this.eventActions = details.eventActions;
                 }
+                if(details.hasOwnProperty('exitActions')) {
+                    this.exitActions = details.exitActions;
+                }
+            }
+
+            function StateDiagram(initialState, states, links) {
+                this.initialState = initialState;
+                this.states = states;
+                this.links = links;
+            }
+            StateDiagram.prototype.getStateByName = function(name) {
+                for(var idx in this.states) {
+                    if(this.states[idx].name === name) {
+                        return this.states[idx];
+                    }
+                }
+                return undefined;
+            }
+            StateDiagram.prototype.getConnectedStates = function(state) {
+                var states = [];
+                this.links.forEach(function(link) {
+                    if(link.from === state.name) {
+                        states.push(this.getStateByName(link.to));
+                    }
+                }, this);
+                return states;
+            }
+
+            function SuperState(details, diagram) {
+                State.call(this, details);
+                this.diagram = diagram;
+            }
+            SuperState.prototype = Object.create(State.prototype);
+            SuperState.prototype.SuperState = SuperState;
+
+            function GridStateDiagram(initialState, states, links) {
+                StateDiagram.call(this, initialState, states, links);
                 
-                function StateGridInfo(state, x, y) {
-                    this.state = state;
-                    this.width = 1;
-                    this.height = 1;
-                }
+                this.grid = [];
 
-                function FsmGridLayout() {
-                    var grid = [[]];
-                }
-
-                var FsmDescription = function(inialState, statesInfo) {
-                    var states = new Map();
-                    var stateNamesToIds = new Map();
-
-                    this.addState = function(id, name) {
-                        states.set(id, new State(id, name));
-                        stateNamesToIds.set(name, id);
-                    };
-
-                    function getState(idOrName) {
-                        var id = idOrName;
-                        if(typeof(idOrName) === 'string') {
-                            id = stateNamesToIds.get(idOrName);
+                this.layoutStatesOntoGrid();
+            }
+            GridStateDiagram.prototype = Object.create(StateDiagram.prototype);
+            GridStateDiagram.prototype.GridStateDiagram = GridStateDiagram;
+            GridStateDiagram.prototype.findStateLocation = function(state) {
+                for(var x in this.grid) {
+                    for(var y in this.grid[x]) {
+                        if(state == this.grid[x][y]) {
+                            return {x: x, y: y};
                         }
-
-                        if(id === undefined || !states.has(id)) {
-                            throw "Unknown state! idOrName = " + idOrName + ", id = " + id;
-                        }
-
-                        return states.get(id);
                     }
-
-                    this.getCells = function() {
-                        return Array.from(states.values());
-                    };
-
-                    this.getStates = function() {
-                        return states;
-                    }
-
-                    function initialize() {
-                        // First pass, add all the states
-                        statesInfo.forEach(function(stateInfo) {
-                            this.addState(stateInfo.id, stateInfo.name);
-                        }, this);
-
-                        // Second pass, process all the links and substates
-                        statesInfo.forEach(function(stateInfo) {
-                            state = states.get(stateInfo.id);
-                            if('links' in stateInfo) {
-                                stateInfo.links.forEach(function(link) {
-                                    state.linkedTo.push(getState(link));
-                                }, this);
-                            }
-                            if('substates' in stateInfo) {
-                                stateInfo.substates.forEach(function(substate) {
-                                    getState(substate).superstate = state;
-                                }, this);
-                            }
-                        }, this);
-                    }
-
-                    // Constructor
-                    initialize.apply(this);
                 }
+                return undefined;
+            };
+            GridStateDiagram.prototype.layoutStatesOntoGrid = function() {
+                var states = [this.getStateByName(this.initialState)];
+                var visited = new Set();
+
+                while(states.length) {
+                    var state = states.shift();
+
+                    if(visited.has(state)) {
+                        continue;
+                    }
+                    visited.add(state);
+
+                    this.grid.push([]);
+                    var loc = this.findStateLocation(state);
+                    if(undefined !== loc) {
+                        this.grid[loc.x].splice(loc.y, 1);
+                    }
+                    this.grid[this.grid.length - 1].push(state);
+
+                    states = states.concat(this.getConnectedStates(state));
+                }
+
+                var loneStates = this.states.filter(function(state) {
+                    return this.findStateLocation(state) === undefined;
+                }, this);
+
+                loneStates.forEach(function(state) {
+                    var connectedStates = this.getConnectedStates(state);
+                    var minX = this.grid.length;
+                    connectedStates.forEach(function(connectedState) {
+                        var loc = this.findStateLocation(connectedState);
+                        if(loc !== undefined) {
+                            minX = Math.min(minX, loc.x);
+                        }
+                    }, this);
+                    if(this.grid.length !== minX) {
+                        this.grid[Math.max(0, minX - 1)].push(state);
+                    }
+                }, this);
+
+                // Adjust back a level, where necessary
+                this.states.forEach(function(state) {
+                    var connectedStates = this.getConnectedStates(state);
+                    var loc = this.findStateLocation(state);
+                    var newX = loc.x;
+                    connectedStates.forEach(function(connectedState) {
+                        var connectedLoc = this.findStateLocation(connectedState);
+                        newX = Math.min(connectedLoc.x, loc.x);
+                    }, this);
+                    if(newX !== loc.x) {
+                        this.grid[loc.x].splice(loc.y, 1);
+                        this.grid[newX].push(state);
+                    }
+                }, this);
+
+                this.grid = this.grid.filter(function(yGrid) {
+                    return yGrid.length > 0;
+                })
+            };
+
+            function actionTextCreator(prefix, actions) {
+                var maxLength = 0;
+                var actionText = "";
+
+                actions.forEach(function(action, index) {
+                    var text;
+                    if(index > 0) {
+                        text = "    ";
+                    } else {
+                        text = prefix + " / ";
+                    }
+                    text += action + "()\n";
+                    maxLength = Math.max(maxLength, text.length);
+
+                    actionText += text;
+                });
 
                 return {
-                    FsmDescription: FsmDescription
+                    text: actionText,
+                    maxLength: maxLength
+                };
+            }
+
+            const DEFAULT_STATE_WIDTH = 150;
+            const DEFAULT_STATE_HEIGHT = 80;
+            const TEXT_HEIGHT = 9;
+            const TEXT_WIDTH = 7;
+
+            function getRenderableStateInfo(state) {
+                var actionText = "";
+                var width = DEFAULT_STATE_WIDTH;
+                var height = DEFAULT_STATE_HEIGHT;
+
+                var actionTextInfo = actionTextCreator("entry", state.entryActions);
+                actionText = actionTextInfo.text;
+
+                height += Math.max(state.entryActions.length, 1) * TEXT_HEIGHT;
+                width = Math.max(width, actionTextInfo.maxLength * TEXT_WIDTH);
+
+                for(var event in state.eventActions) {
+                    actionTextInfo = actionTextCreator(event, state.eventActions[event]);
+                    actionText += actionTextInfo.text;
+
+                    height += state.eventActions[event].length * TEXT_HEIGHT;
+                    width = Math.max(width, actionTextInfo.maxLength * TEXT_WIDTH);
                 }
+
+                actionTextInfo = actionTextCreator("exit", state.exitActions);
+                actionText += actionTextInfo.text;
+
+                height += Math.max(state.exitActions.length, 1) * TEXT_HEIGHT;
+                width = Math.max(width, actionTextInfo.maxLength * TEXT_WIDTH);
+
+                return {
+                    actionText: actionText,
+                    width: width, 
+                    height: height
+                };
+            }
+
+            function getRenderableDiagram(gridDiagram) {
+                var curX = 0;
+                var renderableGrid = [];
+                gridDiagram.grid.forEach(function(column) {
+                    var curY = 0;
+                    renderableGrid.push([]);
+                    column.forEach(function(state) {
+                        if(state instanceof SuperState) {
+
+                        } else {
+                            renderableGrid[renderableGrid.length - 1].push(
+                                getRenderableStateInfo(state));
+                        }
+                    });
+                });
+
+                return renderableGrid;
+            }
+
+            function createStateJointJsElement(renderableState) {
+                return new joint.shapes.quartz.State({
+                    size: {
+                        width: renderableState.width,
+                        height: renderableState.height 
+                    },
+                    attrs: {
+                        ".name": { text: renderableState.name },
+                        ".actions": { text: renderableState.actionText }
+                    }
+                });
+            }
+
+            (function() {
+
+                var ProcessingSuperState = new SuperState(
+                    {
+                        name: "Processing"
+                    },
+                    new StateDiagram(
+                        "BuildingMessage",
+                        [
+                            new State({
+                                name: "BuildingMessage"
+                            }),
+                            new State({
+                                name: "SendingMessage"
+                            }),
+                            new State({
+                                name: "MessageSent"
+                            })
+                        ],
+                        [
+                            {
+                                from: "BuildingMessage",
+                                to: "SendingMessage"
+                            },
+                            {
+                                from: "SendingMessage",
+                                to: "MessageSent"
+                            }
+                        ]
+                    )
+                );
+
+                var TradeWorkflow = new GridStateDiagram(
+                    "NotSent",
+                    [
+                        new State({
+                            name: "NotSent"
+                        }),
+                        ProcessingSuperState,
+                        new State({
+                            name: "SetupIssue"
+                        }),
+                        new State({
+                            name: "SomeState"
+                        }),
+                        new State({
+                            name: "SomeOtherState"
+                        })
+                    ],
+                    [
+                        {
+                            from: "NotSent",
+                            to: "Processing"
+                        },
+                        {
+                            from: "Processing",
+                            to: "SetupIssue"
+                        },
+                        {
+                            from: "SetupIssue",
+                            to: "Processing"
+                        },
+                        {
+                            from: "SomeState",
+                            to: "Processing"
+                        },
+                        {
+                            from: "SomeOtherState",
+                            to: "NotSent"
+                        }
+                    ]
+                );
+                
+                var graph = new joint.dia.Graph;
+            
+                var paper = new joint.dia.Paper({
+                    el: $('#myholder'),
+                    width: 1000,
+                    height: 1000,
+                    model: graph,
+                    gridSize: 1
+                });
+
+                var myState = createStateJointJsElement(
+                    getRenderableStateInfo(new State({
+                        name: "NotSent",
+                        entryActions: ["action1", "action2"],
+                        eventActions: {
+                            MessageSent: ["action3"],
+                            MessageBuilt: ["anotherAction?"],
+                            Limit: ["pushItTo!?"],
+                            More: ["moremoremore"],
+                            Uhoh: ["noooooo"],
+                        },
+                        exitActions: ["SomeOtherLongerAction"]
+                    })));
+                graph.addCell(myState);
+
+                console.log(getRenderableDiagram(TradeWorkflow));
             })();
 
-            var myFsm = new quartz.FsmDescription(
-                'NotSent',
-                [
-                    {
-                        id: 0,
-                        name: 'NotSent',
-                        links: ['Processing']
-                    },
-                    {
-                        id: 1,
-                        name: 'Processing',
-                        links: ['TradeCancelled', 'Complete'],
-                        substates: ['BuildingMessage', 'SendingMessage', 'MessageSent', 'WaitToCancel'],
-                        initialState: 'BuildingMessage'
-                    },
-                    {
-                        id: 2,
-                        name: 'BuildingMessage',
-                        links: ['SendingMessage']
-                    },
-                    {
-                        id: 3,
-                        name: 'SendingMessage',
-                        links: ['MessageSent', 'WaitToCancel']
-                    },
-                    {
-                        id: 4,
-                        name: 'MessageSent'
-                    },
-                    {
-                        id: 5,
-                        name: 'TradeCancelled'
-                    },
-                    {
-                        id: 6,
-                        name: 'Complete'
-                    },
-                    {
-                        id: 7,
-                        name: 'WaitToCancel',
-                        links: ['TradeCancelled']
-                    }
-                ]
-            );
-
-            //graph.addCells(myFsm.getCells());
         </script>
     </body>
 </html>
